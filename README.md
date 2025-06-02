@@ -6,6 +6,6 @@
 2. 安装make和srecord工具
 3. 运行make命令
 4. 如果不安装make 工具, 也可以使用命令行编译:
-   sdcc  LoliDualBrusedBiEsc.c -o LoliDualBrusedBiEsc.ihx
+   sdcc  LoliDualBrBiEsc.c -o LoliDualBrusedBiEsc.ihx
 使用的mcu是STC15 系列的应该都可以, 只有需要6个IO就可以了， 两个IO输出，4个IO输出.
 如STC15W104系列
