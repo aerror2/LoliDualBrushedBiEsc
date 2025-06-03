@@ -4,8 +4,12 @@
 #define u16 unsigned int
 #define NOP() __asm NOP __endasm
 
+
 //----------------------------------------------------------
-//STC15寄存器声明
+//STC15寄存器声明, 原来是使用STC15的，如stc15w104
+//增加STC8G1单片机的支持， 改为timer1做定时，输出脚从p3.5 p3.4 改为p5.5 p5.4
+
+#define STC8G 1
 
 // 将这些行：
 // sfr P3M1=0xb1;
@@ -25,31 +29,52 @@
 // sbit IN2=P3^4;
 
 
-// 改为：
 __sfr __at(0xB1) P3M1;    // P3M1 寄存器
 __sfr __at(0xB2) P3M0;    // P3M0 寄存器
+__sfr __at(0xC9) P5M1;    // P5M1 寄存器
+__sfr __at(0xCA) P5M0;    // P5M0 寄存器
+
 __sfr __at(0x8E) AUXR;    // AUXR 寄存器
+__sfr __at(0x8A) T0L;     // Timer0 
+__sfr __at(0x8C) T0H;     // Timer0 
+__sfr __at(0x8B) T1L;     // Timer1 
+__sfr __at(0x8D) T1H;     // Timer1 
+
+
 __sfr __at(0xD6) T2H;     // Timer2 高字节
 __sfr __at(0xD7) T2L;     // Timer2 低字节
 __sfr __at(0xAF) IE2;     // 中断使能寄存器2
 
 
-
-// 改为：
 __sbit __at(0xB0) P30;  // P3.0  
 __sbit __at(0xB1) P31;  // P3.1
 __sbit __at(0xB2) P32;  // P3.2
 __sbit __at(0xB3) P33;  // P3.3
-__sbit __at(0xB5) P35;  // P3.5
 __sbit __at(0xB4) P34;  // P3.4
+__sbit __at(0xB5) P35;  // P3.5
+
+__sbit __at(0xC8) P50;  // P5.0  
+__sbit __at(0xC9) P51;  // P5.1
+__sbit __at(0xCA) P52;  // P5.2
+__sbit __at(0xCB) P53;  // P5.3
+__sbit __at(0xCC) P54;  // P5.4
+__sbit __at(0xCD) P55;  // P5.5
+__sbit __at(0xCE) P56;  // P5.6
+__sbit __at(0xCF) P57;  // P5.7
+
 
 #define A1 P30
 #define A2 P31
 #define B1 P32
 #define B2 P33
 
+#if STC8G
+#define IN1 P55   //pwm 输入1
+#define IN2 P54	//pwm 输入2
+#else
 #define IN1 P35   //pwm 输入1
 #define IN2 P34	//pwm 输入2
+#endif
 
 
 
@@ -185,8 +210,14 @@ void main()
                     // (1, 1): 开漏 (内部电阻断开)
                     // P3M0的低4位 (P3.0-P3.3) 设置为1，高4位 (P3.4-P3.7) 设置为0。
 					// 如果P3M1默认为0，则P3.0-P3.3的模式为 (0,1) 推挽输出，P3.4-P3.7的模式为 (0,0) 准双向口。
-					// 这与代码注释“IO推挽输出”部分一致，表明P3的低4位被配置为推挽输出。
+					// 这与代码注释“IO推挽输出”部分一致，表明P3的低4位被配置为推挽输出, 然后p34, p35是准双向口 (弱上拉)
 	
+#if STC8G
+					//(0, 0): 准双向口 (弱上拉)	
+	P5M1=0x00;      // 将P5M1寄存器设置为0x00 (二进制 0000 0000)。这通常用于设置P5端口的模式。根据您提供的模式表 (P5M1位, P5M0位)：
+	P5M0=0x00;      // 将P5M1寄存器设置为0x00 (二进制 0000 0000)。这通常用于设置P5端口的模式。根据您提供的模式表 (P5M1位, P5M0位)：
+#endif
+
 	delay_ms(400);  // 调用延时函数，暂停程序执行约400毫秒。
 	
 	shock(200);     // 调用 shock 函数，参数为200。
@@ -194,7 +225,15 @@ void main()
 	shock(100);     // 调用 shock 函数，参数为100。
                     // 这三行代码及其注释“上电音乐，表明正常工作”表明，通过调用 shock 函数并传入不同的参数，可能是在控制蜂鸣器或其他音频设备发出不同音调的声音，形成一段“上电音乐”，以此作为微控制器正常启动的指示。
 	
-	
+#if STC8G
+	IE=0x88;        // 将IE寄存器设置为0x80 (二进制 1000 1000)。 ET1 = 1
+// 在许多8051系列的微控制器中，IE寄存器的最高位 (EA, Enable All)
+//  用于全局中断使能。设置为1 (0x80) 表示使能总中断，允许各个独立中断源产生中断请求。
+	T1L=0xF6;T1H=0xFF;  //开启软件PWM
+
+	AUXR = 0x00; //T1x12 = 0
+	TCON = 0x40; //0100 0000  TR1=1
+#else
 	IE=0x80;        // 将IE寄存器设置为0x80 (二进制 1000 0000)。
 					// 在许多8051系列的微控制器中，IE寄存器的最高位 (EA, Enable All)
 					//  用于全局中断使能。设置为1 (0x80) 表示使能总中断，允许各个独立中断源产生中断请求。
@@ -202,7 +241,6 @@ void main()
 						// IE2是中断使能寄存器2，用于控制其他中断源的使能。
 						// 0x04表示设置了第2位（从0开始计数）。
 						// 根据手册是 第2位 ET2 , 定时器允许中断
-
 	T2L=0xF6;T2H=0xFF;  //开启软件PWM
 	AUXR=0x10;
 // 定时器初值：
@@ -217,6 +255,8 @@ void main()
 // 第3位(T2x12) = 0  12分频
 // 第4位(T2C/T) = 0   ，T2C/T=0，内部时钟
 // 第5位(T2R)=1 ， 允许T2 运行
+#endif
+
 
 	
 	while(1)
@@ -419,7 +459,11 @@ void main()
 //PWM_count 是0-100， 即每1000us 重置一次
 //PWM_duty_A 和PWM_duty_B, 取值都是0-100，当PWM_count 小于PWM_duty_A/B时，管脚高电平，否则低
 //软件PWM 1Khz
+#if STC8G
+void T1_isr() __interrupt(3)
+#else
 void T2_isr() __interrupt(12)
+#endif
 {
 
 	
