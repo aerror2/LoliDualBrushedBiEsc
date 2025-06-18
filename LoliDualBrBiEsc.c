@@ -129,6 +129,38 @@ unsigned char status_bits;
 #define CLR_Direction_A() (status_bits &= ~0x20)
 #define CLR_Direction_B() (status_bits &= ~0x40)
 
+// 状态机状态定义
+#define STATE_INIT_COMPLETE   0  // 初始化完成
+#define STATE_CHECK_SIGNAL    1  // 检查输入信号中
+#define STATE_SETTING         2  // 功能设置中
+#define STATE_NORMAL_RUNNING  3  // 正常运行中
+
+// 功能设置相关定义
+#define FUNC_MIX_CONTROL      1  // 功能1：混控设置
+#define FUNC_DIRECTION        2  // 功能2：方向设置
+
+// 参数值定义
+#define PARAM_MIX_DISABLE     1  // 默认不混控
+#define PARAM_MIX_ENABLE      2  // 启用混控
+#define PARAM_DIR_BIDIRECT    1  // 默认双向
+#define PARAM_DIR_UNIDIRECT   2  // 单向
+
+// 油门状态定义
+#define THROTTLE_ZERO         0  // 油门归零
+#define THROTTLE_UP           1  // 油门提升
+#define THROTTLE_FULL         2  // 全油门
+
+u8 system_state = STATE_INIT_COMPLETE;  // 系统状态
+u8 current_function = FUNC_MIX_CONTROL; // 当前设置的功能
+u8 current_param = PARAM_MIX_DISABLE;   // 当前参数值
+u8 beep_counter = 0;                    // 蜂鸣器计数器
+u8 repeat_counter = 0;                  // 重复计数器
+u8 throttle_state = THROTTLE_ZERO;      // 油门状态跟踪
+
+// 混控和方向设置
+u8 mix_control_setting = PARAM_MIX_DISABLE;  // 默认不混控
+u8 direction_setting = PARAM_DIR_BIDIRECT;   // 默认双向
+
 int mix_x,mix_y;
 
 //bit Direction_A,Direction_B;
@@ -193,6 +225,117 @@ void shock( u8 n)    //震动发声
 	delay_us(n);
 }
 
+// 短音"哔"
+void beep_short(u8 tone)
+{
+	shock(tone);
+	delay_ms(100);
+}
+
+// 长音"哔"
+void beep_long(u8 tone)
+{
+	shock(tone);
+	delay_ms(300);
+}
+
+// 双响"哔哔"
+void beep_double(u8 tone)
+{
+	shock(tone);
+	delay_ms(100);
+	shock(tone);
+	delay_ms(100);
+}
+
+// 播放启动序列音
+void play_startup_sound()
+{
+	// 升调三声"哔哔哔"
+	shock(200);
+	shock(150);
+	shock(100);
+}
+
+// 播放油门提升音
+void play_throttle_up_sound()
+{
+	// 一声长低音"哔"
+	beep_long(200);
+}
+
+// 播放全油门音
+void play_full_throttle_sound()
+{
+	// 连续发出4声短促高音"哔"
+	for(u8 i=0; i<4; i++)
+	{
+		beep_short(100);
+	}
+}
+
+// 播放油门归零音
+void play_zero_throttle_sound()
+{
+	// 发出4组低音双响"哔哔"
+	for(u8 i=0; i<4; i++)
+	{
+		beep_double(200);
+		delay_ms(100);
+	}
+}
+
+// 播放进入编程模式音
+void play_enter_program_sound()
+{
+	// 发出4声升调"哔哔哔哔"
+	for(u8 i=0; i<4; i++)
+	{
+		shock(200 - i*25);
+	}
+}
+
+// 播放功能参数提示音
+void play_param_sound(u8 function, u8 param)
+{
+	if(function == FUNC_MIX_CONTROL) // 功能1
+	{
+		// 一个长"哔"音
+		beep_long(150);
+		delay_ms(100);
+		
+		if(param == PARAM_MIX_DISABLE) // 参数1
+		{
+			// 接着是1个短的"哔"音
+			beep_short(150);
+		}
+		else // 参数2
+		{
+			// 接着是1个短的"哔-哔"音
+			beep_double(150);
+		}
+	}
+	else if(function == FUNC_DIRECTION) // 功能2
+	{
+		// 一个长的"哔-哔"音
+		beep_long(150);
+		delay_ms(100);
+		beep_long(150);
+		delay_ms(100);
+		
+		if(param == PARAM_DIR_BIDIRECT) // 参数1
+		{
+			// 接着是一个短"哔"音
+			beep_short(150);
+		}
+		else // 参数2
+		{
+			// 接着是一个短"哔-哔"音
+			beep_double(150);
+		}
+	}
+}
+
 
 void main()
 {
@@ -219,10 +362,20 @@ void main()
 
 	delay_ms(400);  // 调用延时函数，暂停程序执行约400毫秒。
 	
-	shock(200);     // 调用 shock 函数，参数为200。
-	shock(150);     // 调用 shock 函数，参数为150。
-	shock(100);     // 调用 shock 函数，参数为100。
-                    // 这三行代码及其注释“上电音乐，表明正常工作”表明，通过调用 shock 函数并传入不同的参数，可能是在控制蜂鸣器或其他音频设备发出不同音调的声音，形成一段“上电音乐”，以此作为微控制器正常启动的指示。
+	// 初始化状态机变量
+	system_state = STATE_INIT_COMPLETE;
+	throttle_state = THROTTLE_ZERO;
+	current_function = FUNC_MIX_CONTROL;
+	current_param = PARAM_MIX_DISABLE;
+	beep_counter = 0;
+	repeat_counter = 0;
+	
+	// 初始化功能设置参数
+	mix_control_setting = PARAM_MIX_DISABLE; // 默认不混控
+	direction_setting = PARAM_DIR_BIDIRECT;  // 默认双向
+	
+	// 播放开机音乐
+	play_startup_sound(); // 上电音乐，表明正常工作
 	
 #if STC8G
 	IE=0x88;        // 将IE寄存器设置为0x80 (二进制 1000 1000)。 ET1 = 1
@@ -260,50 +413,175 @@ void main()
 	
 	while(1)
 	{
-		
+		// 处理输入信号 - 在所有状态下都需要执行的代码
+		// 这部分代码需要一直运行，不受状态机状态影响
 		if(get_pulse1)
 		{
 			CLR_get_pulse1();
 			
-			pulse =IN1_H_time;			
-			IN1_H_time=0;
+			pulse = IN1_H_time;			
+			IN1_H_time = 0;
 			
-			if(pulse >85 && pulse <215) //只受理合理舵量范围
+			if(pulse > 85 && pulse < 215) // 只受理合理舵量范围
 			{
-				timer1=0;
+				timer1 = 0;
 				
-				if(pulse <105)pulse =105;
-				if(pulse >195)pulse =195; 
+				if(pulse < 105) pulse = 105;
+				if(pulse > 195) pulse = 195; 
 				
-				if(lose_A)lose_A--;  //丢信号重连保护
-				else { SET_get_new(); pulse1=pulse; }
-				
+				if(lose_A) lose_A--;  // 丢信号重连保护
+				else { SET_get_new(); pulse1 = pulse; }
 			}
-			
 		}
 		
 		if(get_pulse2)
 		{
 			CLR_get_pulse2();
 			
-			pulse =IN2_H_time;			
-			IN2_H_time=0;
+			pulse = IN2_H_time;			
+			IN2_H_time = 0;
 			
-			if(pulse >85 && pulse <215)
+			if(pulse > 85 && pulse < 215)
 			{
-				timer2=0;
+				timer2 = 0;
 				
-				if(pulse <105)pulse =105;
-				if(pulse >195)pulse =195;		//舵量限幅 1050~1950	
+				if(pulse < 105) pulse = 105;
+				if(pulse > 195) pulse = 195;		// 舵量限幅 1050~1950	
 
-				if(lose_B)lose_B--;  //丢信号重连保护
-				else { SET_get_new(); pulse2=pulse; }
+				if(lose_B) lose_B--;  // 丢信号重连保护
+				else { SET_get_new(); pulse2 = pulse; }
 			}			
-			
 		}
 		
+		// 状态机处理
+		switch(system_state)
+		{
+		case STATE_INIT_COMPLETE:
+			// 初始化完成状态，等待油门提升
+			system_state = STATE_CHECK_SIGNAL;
+			break;
+			
+		case STATE_CHECK_SIGNAL:
+			// 检查输入信号状态
+			// 检测油门状态变化
+			if(pulse1 > 105 && throttle_state == THROTTLE_ZERO)
+			{
+				// 油门从零位提升
+				throttle_state = THROTTLE_UP;
+				play_throttle_up_sound(); // 发出一声长低音"哔"
+			}
+			else if(pulse1 >= 190 && throttle_state == THROTTLE_UP)
+			{
+				// 检测到全油门
+				throttle_state = THROTTLE_FULL;
+				play_full_throttle_sound(); // 连续发出4声短促高音"哔"
+			}
+			else if(pulse1 <= 110 && throttle_state == THROTTLE_FULL)
+			{
+				// 油门归零
+				throttle_state = THROTTLE_ZERO;
+				play_zero_throttle_sound(); // 发出4组低音双响"哔哔"
+			}
+			else if(pulse1 >= 190 && throttle_state == THROTTLE_ZERO)
+			{
+				// 再次检测到全油门，进入编程模式
+				throttle_state = THROTTLE_FULL;
+				play_enter_program_sound(); // 发出4声升调"哔哔哔哔"
+				system_state = STATE_SETTING;
+				current_function = FUNC_MIX_CONTROL;
+				current_param = mix_control_setting;
+				repeat_counter = 0;
+			}
+			break;
+			
+		case STATE_SETTING:
+			// 功能设置状态
+			if(beep_counter == 0)
+			{
+				// 播放当前功能和参数的提示音
+				play_param_sound(current_function, current_param);
+				beep_counter = 100; // 设置延时
+				repeat_counter++;
+				
+				if(repeat_counter >= 3)
+				{
+					// 重复三次后切换到下一个参数或功能
+					repeat_counter = 0;
+					
+					if(current_function == FUNC_MIX_CONTROL)
+					{
+						// 从功能1切换到功能2
+						current_function = FUNC_DIRECTION;
+						current_param = direction_setting;
+					}
+					else
+					{
+						// 设置完成，回到功能1
+						current_function = FUNC_MIX_CONTROL;
+						current_param = mix_control_setting;
+					}
+				}
+			}
+			else
+			{
+				beep_counter--;
+			}
+			
+			// 检测油门归零，保存设置并退出编程模式
+			if(pulse1 <= 110 && throttle_state == THROTTLE_FULL)
+			{
+				// 保存当前设置
+				if(current_function == FUNC_MIX_CONTROL)
+				{
+					mix_control_setting = current_param;
+				}
+				else if(current_function == FUNC_DIRECTION)
+				{
+					direction_setting = current_param;
+				}
+				
+				// 退出编程模式
+				throttle_state = THROTTLE_ZERO;
+				system_state = STATE_NORMAL_RUNNING;
+				beep_short(150); // 发出一声短音表示保存成功
+			}
+			
+			// 检测油门变化，切换参数
+			if(pulse1 >= 190 && throttle_state != THROTTLE_FULL)
+			{
+				throttle_state = THROTTLE_FULL;
+				
+				// 切换当前参数
+				if(current_param == PARAM_MIX_DISABLE || current_param == PARAM_DIR_BIDIRECT)
+				{
+					current_param++; // 切换到第二个参数
+				}
+				else
+				{
+					current_param--; // 切换回第一个参数
+				}
+				
+				repeat_counter = 0;
+				beep_counter = 0; // 立即播放新参数的提示音
+			}
+			else if(pulse1 <= 110 && throttle_state == THROTTLE_FULL)
+			{
+				throttle_state = THROTTLE_ZERO;
+			}
+			break;
+			
+		case STATE_NORMAL_RUNNING:
+			// 正常运行状态，无需额外处理输入信号（已在状态机外处理）
+			break;
+			
+		default:
+			// 未知状态，重置为初始化完成状态
+			system_state = STATE_INIT_COMPLETE;
+			break;
+		}
 		
-		if(get_new)
+		// 处理get_new信号 - 在所有状态下都需要执行
+		if(get_new && STATE_NORMAL_RUNNING==system_state)
 		{
 			CLR_get_new();
 			
