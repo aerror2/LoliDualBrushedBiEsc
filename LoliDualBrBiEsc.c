@@ -2,6 +2,8 @@
 
 #define u8 unsigned char
 #define u16 unsigned int
+#define u32 unsigned long
+
 #define NOP() __asm NOP __endasm
 
 
@@ -168,7 +170,7 @@ int mix_x,mix_y;
 
 int pulse1=150,pulse2=150;
 u8 lose_A=20,lose_B=20;  //更新：上电默认处于失控状态，防止第一次信号检测错误
-
+u32 g_ticks; //全局时钟
 
 //----------------------------------------------------------
 //混控设置
@@ -202,59 +204,163 @@ void delay_us(u8 us)		//@12.000MHz
 	}
 }
 
-void shock( u8 n)    //震动发声
+
+// 基于g_ticks的精确延时函数，带有最大延时限制
+// 输入参数：us - 目标延时微秒数
+// 返回值：1 - 达到目标时间，0 - 提前返回
+u8 delay_us_max(u16 us)
+{
+	u32 target_ticks;
+	u32 start_ticks = g_ticks;
+	u32 max_ticks;
+	u8 loop_count;
+	
+	// 计算目标ticks值，每10μs增加1个tick
+	target_ticks = start_ticks + (us / 10) + ((us % 10) ? 1 : 0);
+	
+	// 先以最大可能性计算循环次数
+	loop_count = (us > 0) ? ((us / 10) + 1) : 1;
+	
+	// 循环执行processinput，同时检查g_ticks
+	while(loop_count--)
+	{
+		processinput(); // 处理输入
+		
+		// 检查是否已经达到目标时间
+		if(g_ticks >= target_ticks)
+		{
+			return 1; // 达到目标时间，正常返回
+		}
+	}
+	
+	return 0; // 未达到目标时间，提前返回
+}
+
+// 使用delay_us_max实现的毫秒级延时函数
+u8 delay_ms_max(u16 ms)
+{
+	u8 result = 1;
+	u16 us;
+	
+	// 将毫秒转换为微秒
+	us = ms * 1000;
+	
+	// 如果超过delay_us_max的最大参数值(65535)，则多次调用
+	while(us > 65535)
+	{
+		result &= delay_us_max(65535);
+		us -= 65535;
+	}
+	
+	// 处理剩余的微秒数
+	if(us > 0)
+	{
+		result &= delay_us_max(us);
+	}
+	
+	return result;
+}
+
+
+
+void processinput()
+{
+	if(get_pulse1)
+	{
+		CLR_get_pulse1();
+		
+		pulse = IN1_H_time;			
+		IN1_H_time = 0;
+		
+		if(pulse > 85 && pulse < 215) // 只受理合理舵量范围
+		{
+			timer1 = 0;
+			
+			if(pulse < 105) pulse = 105;
+			if(pulse > 195) pulse = 195; 
+			
+			if(lose_A) lose_A--;  // 丢信号重连保护
+			else { SET_get_new(); pulse1 = pulse; }
+		}
+	}
+	
+	if(get_pulse2)
+	{
+		CLR_get_pulse2();
+		
+		pulse = IN2_H_time;			
+		IN2_H_time = 0;
+		
+		if(pulse > 85 && pulse < 215)
+		{
+			timer2 = 0;
+			
+			if(pulse < 105) pulse = 105;
+			if(pulse > 195) pulse = 195;		// 舵量限幅 1050~1950	
+
+			if(lose_B) lose_B--;  // 丢信号重连保护
+			else { SET_get_new(); pulse2 = pulse; }
+		}			
+	}
+	
+}
+
+
+void shock( u8 n, u8 len)    //震动发声，n为延时参数，len为循环次数
 {
 	u8 i;
-	for(i=0;i<250;i++)
+	
+	for(i=0;i<len;i++)
 	{
 		A1=0,A2=0;
 		B1=0,B2=0;		
-		delay_us(n);
+		// 使用最大延时函数
+		delay_us_max(n);
 		
 		A1=1;B1=1;
-		delay_us(n);
+		delay_us_max(n);
 		
 		A1=0;B1=0;		
-		delay_us(n);
+		delay_us_max(n);
 				
 		A2=1;B2=1;
-		delay_us(n);	
+		delay_us_max(n);
 	}
 	A1=0,A2=0;
 	B1=0,B2=0;
-	delay_us(n);
+	delay_us_max(n);
 }
 
 // 短音"哔"
 void beep_short(u8 tone)
 {
-	shock(tone);
-	delay_ms(100);
+	shock(tone, 100); // 减少循环次数，产生更短的音效
+	delay_ms_max(100); // 使用delay_ms_max替代delay_ms
 }
 
 // 长音"哔"
 void beep_long(u8 tone)
 {
-	shock(tone);
-	delay_ms(300);
+	shock(tone, 400); // 增加循环次数，产生更长的音效
+	delay_ms_max(100); // 使用delay_ms_max替代delay_ms
 }
 
 // 双响"哔哔"
 void beep_double(u8 tone)
 {
-	shock(tone);
-	delay_ms(100);
-	shock(tone);
-	delay_ms(100);
+	shock(tone, 100); // 使用与 beep_short 一致的循环次数
+	delay_ms_max(100); // 使用delay_ms_max替代delay_ms
+	shock(tone, 100); // 使用与 beep_short 一致的循环次数
+	delay_ms_max(100); // 使用delay_ms_max替代delay_ms
 }
 
 // 播放启动序列音
 void play_startup_sound()
 {
 	// 升调三声"哔哔哔"
-	shock(200);
-	shock(150);
-	shock(100);
+	shock(200, 150); // 调整循环次数，使音效更清晰
+	shock(150, 150); // 调整循环次数，使音效更清晰
+	shock(100, 150); // 调整循环次数，使音效更清晰
 }
 
 // 播放油门提升音
@@ -281,7 +387,7 @@ void play_zero_throttle_sound()
 	for(u8 i=0; i<4; i++)
 	{
 		beep_double(200);
-		delay_ms(100);
+		delay_ms_max(100); // 使用delay_ms_max替代delay_ms
 	}
 }
 
@@ -291,7 +397,7 @@ void play_enter_program_sound()
 	// 发出4声升调"哔哔哔哔"
 	for(u8 i=0; i<4; i++)
 	{
-		shock(200 - i*25);
+		shock(200 - i*25, 150); // 调整循环次数，与其他函数保持一致
 	}
 }
 
@@ -302,7 +408,7 @@ void play_param_sound(u8 function, u8 param)
 	{
 		// 一个长"哔"音
 		beep_long(150);
-		delay_ms(100);
+		delay_ms_max(100); // 使用delay_ms_max替代delay_ms
 		
 		if(param == PARAM_MIX_DISABLE) // 参数1
 		{
@@ -319,9 +425,9 @@ void play_param_sound(u8 function, u8 param)
 	{
 		// 一个长的"哔-哔"音
 		beep_long(150);
-		delay_ms(100);
+		delay_ms_max(100);
 		beep_long(150);
-		delay_ms(100);
+		delay_ms_max(100);
 		
 		if(param == PARAM_DIR_BIDIRECT) // 参数1
 		{
@@ -374,8 +480,7 @@ void main()
 	mix_control_setting = PARAM_MIX_DISABLE; // 默认不混控
 	direction_setting = PARAM_DIR_BIDIRECT;  // 默认双向
 	
-	// 播放开机音乐
-	play_startup_sound(); // 上电音乐，表明正常工作
+
 	
 #if STC8G
 	IE=0x88;        // 将IE寄存器设置为0x80 (二进制 1000 1000)。 ET1 = 1
@@ -415,48 +520,13 @@ void main()
 	{
 		// 处理输入信号 - 在所有状态下都需要执行的代码
 		// 这部分代码需要一直运行，不受状态机状态影响
-		if(get_pulse1)
-		{
-			CLR_get_pulse1();
-			
-			pulse = IN1_H_time;			
-			IN1_H_time = 0;
-			
-			if(pulse > 85 && pulse < 215) // 只受理合理舵量范围
-			{
-				timer1 = 0;
-				
-				if(pulse < 105) pulse = 105;
-				if(pulse > 195) pulse = 195; 
-				
-				if(lose_A) lose_A--;  // 丢信号重连保护
-				else { SET_get_new(); pulse1 = pulse; }
-			}
-		}
-		
-		if(get_pulse2)
-		{
-			CLR_get_pulse2();
-			
-			pulse = IN2_H_time;			
-			IN2_H_time = 0;
-			
-			if(pulse > 85 && pulse < 215)
-			{
-				timer2 = 0;
-				
-				if(pulse < 105) pulse = 105;
-				if(pulse > 195) pulse = 195;		// 舵量限幅 1050~1950	
-
-				if(lose_B) lose_B--;  // 丢信号重连保护
-				else { SET_get_new(); pulse2 = pulse; }
-			}			
-		}
-		
+		processinput();
 		// 状态机处理
 		switch(system_state)
 		{
 		case STATE_INIT_COMPLETE:
+			// 播放开机音乐
+			play_startup_sound(); // 上电音乐，表明正常工作
 			// 初始化完成状态，等待油门提升
 			system_state = STATE_CHECK_SIGNAL;
 			break;
@@ -743,6 +813,7 @@ void T2_isr() __interrupt(12)
 #endif
 {
 
+	g_ticks++;
 	
 	if(IN1)					//通道1脉宽检测
 	{
